@@ -33,7 +33,7 @@ from modules.METAFILE import METAFILE
 
 
 class QUANTLET:
-    def __init__(self, github_token=None, user=None):
+    def __init__(self, github_token=None, user=None,stop_until_at_least_remaining=None):
         """Constructor of the QUANTLET class.
 
         Arguments:
@@ -49,8 +49,12 @@ class QUANTLET:
         else:
             self.g = Github(github_token).get_user(user)
         self.errors = []
+        if stop_until_at_least_remaining is None:
+            self.at_least_remaining = 0
+        else:
+            self.at_least_remaining = stop_until_at_least_remaining
 
-    def stop_until_rate_reset(self,at_least_remaining=None):
+    def stop_until_rate_reset(self):
         """Checks the limit rate that is given by Github and pauses function if rate is too small.
 
         at_least_reamining -- (int) minimum number of api calls too remain, default: None. If None it is set to 0.
@@ -59,15 +63,14 @@ class QUANTLET:
         #rate = Github(self.github_token).get_rate_limit().rate
         rate = Github(self.github_token).get_rate_limit().core
 
-        if at_least_remaining is None:
-            at_least_remaining = 0
-        assert isinstance(at_least_remaining,int)
-        if rate.remaining <= at_least_remaining:
+        
+        assert isinstance(self.at_least_remaining,int)
+        if rate.remaining <= self.at_least_remaining:
             print('\nPause until around %s' % (rate.reset.strftime('%Y-%m-%d %H:%M:%S')))
             while True:
                 rate = Github(self.github_token).get_rate_limit().rate
                 #rate = Github(self.github_token).get_rate_limit().core
-                if rate.remaining > at_least_remaining:
+                if rate.remaining > self.at_least_remaining:
                     break
                 t = rate.reset - datetime.datetime.utcnow() + datetime.timedelta(seconds=1)
                 sleep(max([np.ceil(t.total_seconds()), 120]))
@@ -80,7 +83,7 @@ class QUANTLET:
         server_path -- path within repo
         override -- override existing Metafile information already saved, default: None.
         """
-        self.stop_until_rate_reset(50)
+        self.stop_until_rate_reset()
         try:
             # get repo content from directory server_path
             contents = repo.get_dir_contents(server_path)
@@ -110,7 +113,7 @@ class QUANTLET:
             return None
         repo = self.g.get_repo(qs[list(qs.keys())[0]].repo_name)
         for k,v in tqdm(qs.items()):
-            self.stop_until_rate_reset(50)
+            self.stop_until_rate_reset()
             if v.repo_name != repo.name:
                 repo = self.g.get_repo(v.repo_name)
             path = v.directory.lstrip(v.repo_name).lstrip('/')
@@ -204,10 +207,10 @@ class QUANTLET:
         assert isinstance(since, datetime.datetime), \
             "Variable since must be of type datetime.datetime, e.g. datetime.datetime.strptime('2018-01-01', '%Y-%m-%d')"
         since += datetime.timedelta(seconds=1)
-        self.stop_until_rate_reset(50)
+        self.stop_until_rate_reset()
         ret = []
         for repo in tqdm(list(self.g.get_repos())):
-            self.stop_until_rate_reset(50)
+            self.stop_until_rate_reset()
             try:
                 if repo.get_commits(since=since).get_page(0):
                     ret.append(repo.name)
@@ -263,16 +266,16 @@ class QUANTLET:
             readme = '\n\n'.join(strl)
             return readme
 
-        self.stop_until_rate_reset(50)
+        self.stop_until_rate_reset()
         if repos is None:
             repos = list(self.g.get_repos())
 
         for repo in tqdm(repos):
-            self.stop_until_rate_reset(50)
+            self.stop_until_rate_reset()
             qs = {k:v for k,v in self.quantlets.items() if repo.name.lower() == v.repo_name.lower()}
             for k,v in qs.items():
                 try:
-                    self.stop_until_rate_reset(50)
+                    self.stop_until_rate_reset()
                     contents = repo.get_contents(v.directory.lstrip(v.repo_name))
                     if [i for i in contents if 'README.md'.lower() == i.name.lower()]:
                         continue
