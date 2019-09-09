@@ -5,12 +5,13 @@ Created on Mon Oct 15 11:02:37 2018
 
 import os
 # Change working directory to the repository path
-os.chdir('/home/ms/github/quantlet_evaluation')
+os.chdir('../Quantlet_Evaluation')
 
 # Loading QUANTLET class
 from modules.QUANTLET import QUANTLET
 
-# Add github token, if you try to acces a private repository or there are a lot of files to be checked
+# Add github token, if you try to access a private repository or 
+# to have a higher access limit.
 github_token = None
 # set the user name 
 USER = 'quantlet'
