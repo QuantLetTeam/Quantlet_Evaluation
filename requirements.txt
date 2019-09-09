@@ -1,0 +1,10 @@
+gensim==3.8.0
+jsonpickle==1.2
+matplotlib==3.1.1
+nltk==3.4.5
+numpy==1.17.2
+pandas==0.25.1
+PyGithub==1.43.8
+PyYAML==5.1.2
+sklearn==0.0
+tqdm==4.35.0
