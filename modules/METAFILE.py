@@ -12,7 +12,7 @@ from nltk.corpus import stopwords
 class METAFILE:
     """ This class contains the matainfo files informations. """
     keyReplacement = {
-        'author': [],
+        'author': ['authors'],
         'input': ['inputs'],
         'datafiles': ['datafile'],
         'name of quantlet': ['iname of quantlet'],
@@ -38,7 +38,7 @@ class METAFILE:
         self.commit_last = {k: v for k, v in commits[0].raw_data.items() if k in ['sha', 'commit']}
         self.sha = file.sha
         self.size = file.size
-        try:
+        try: #FIXME: no general error exceptions
             try:
                 self.metainfo_debugged = METAFILE.yaml_debugger(self.metainfo_undebugged)
             except yaml.scanner.ScannerError as e:
@@ -134,6 +134,8 @@ class METAFILE:
         """ Saves the keywords as a list """
         if isinstance(self.metainfo_debugged['keywords'],list):
             self.keyword_list = self.metainfo_debugged['keywords']
+        elif self.metainfo_debugged['keywords'] is None:
+            self.keyword_list = []
         else:
             self.keyword_list = self.metainfo_debugged['keywords'].split(',')
             self.keyword_list = [i.lstrip(' ') for i in self.keyword_list]
@@ -181,7 +183,7 @@ class METAFILE:
                 self.grading_output['submitted_year'] = datetime.datetime.strptime(self.last_modified,'%a, %d %b %Y %H:%M:%S GMT').strftime('%Y')
                 
             except:
-                self.grading_output['q_quali'].append('F')
+                self.grading_output['q_quali'] = 'F'
                 '! '.join(self.grading_output['comment'])
                 return None
             if self.grading_output['keywords'] < 5:

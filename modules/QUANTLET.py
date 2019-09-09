@@ -8,7 +8,7 @@ Created on Thu Jun 21 13:22:38 2018
 import numpy as np
 import pandas as pd
 import datetime, nltk, re, itertools, jsonpickle,json, copy,sys,os
-from github import Github, GithubException, InputGitTreeElement
+from github import Github, GithubException, InputGitTreeElement,UnknownObjectException
 from sklearn.feature_extraction.text import CountVectorizer
 from collections import Counter
 from scipy.sparse import csc_matrix
@@ -33,7 +33,7 @@ from modules.METAFILE import METAFILE
 
 
 class QUANTLET:
-    def __init__(self, github_token=None, user=None,stop_until_at_least_remaining=None):
+    def __init__(self, github_token=None, user=None):
         """Constructor of the QUANTLET class.
 
         Arguments:
@@ -49,12 +49,8 @@ class QUANTLET:
         else:
             self.g = Github(github_token).get_user(user)
         self.errors = []
-        if stop_until_at_least_remaining is None:
-            self.at_least_remaining = 0
-        else:
-            self.at_least_remaining = stop_until_at_least_remaining
 
-    def stop_until_rate_reset(self):
+    def stop_until_rate_reset(self,at_least_remaining=None):
         """Checks the limit rate that is given by Github and pauses function if rate is too small.
 
         at_least_reamining -- (int) minimum number of api calls too remain, default: None. If None it is set to 0.
@@ -63,14 +59,15 @@ class QUANTLET:
         #rate = Github(self.github_token).get_rate_limit().rate
         rate = Github(self.github_token).get_rate_limit().core
 
-        
-        assert isinstance(self.at_least_remaining,int)
-        if rate.remaining <= self.at_least_remaining:
+        if at_least_remaining is None:
+            at_least_remaining = 0
+        assert isinstance(at_least_remaining,int)
+        if rate.remaining <= at_least_remaining:
             print('\nPause until around %s' % (rate.reset.strftime('%Y-%m-%d %H:%M:%S')))
             while True:
-                rate = Github(self.github_token).get_rate_limit().rate
+                rate = Github(self.github_token).get_rate_limit().core
                 #rate = Github(self.github_token).get_rate_limit().core
-                if rate.remaining > self.at_least_remaining:
+                if rate.remaining > at_least_remaining:
                     break
                 t = rate.reset - datetime.datetime.utcnow() + datetime.timedelta(seconds=1)
                 sleep(max([np.ceil(t.total_seconds()), 120]))
@@ -83,7 +80,7 @@ class QUANTLET:
         server_path -- path within repo
         override -- override existing Metafile information already saved, default: None.
         """
-        self.stop_until_rate_reset()
+        self.stop_until_rate_reset(50)
         try:
             # get repo content from directory server_path
             contents = repo.get_dir_contents(server_path)
@@ -95,7 +92,7 @@ class QUANTLET:
         for content in contents:
             if content.type == 'dir':
                 self.__download_metafiles_from_repository(repo, server_path=content.path)
-            elif content.name.lower() == 'metainfo.txt':
+            elif content.name.lower() in ['metainfo.txt','metainfo']:
                 key = '/'.join([repo.name, content.path])
                 tmp_bool = key in self.quantlets.keys()
                 if (not tmp_bool) or (tmp_bool and override):
@@ -107,17 +104,25 @@ class QUANTLET:
     def update_existing_metafiles(self,repos2update=None):
         """Searches for Quantlets that have been changed and updates the saved information."""
         if repos2update is None:
-            repos2update = self.get_recently_changed_repos(since=self.get_last_commit())
+            repos2update,repos_del = self.get_recently_changed_repos(since=self.get_last_commit())
+            self.remove_deleted_repos(repos_del)
         qs = {k:v for k,v in self.quantlets.items() if v.repo_name in repos2update}
         if not qs:
             return None
         repo = self.g.get_repo(qs[list(qs.keys())[0]].repo_name)
         for k,v in tqdm(qs.items()):
-            self.stop_until_rate_reset()
+            #print(k)
+            self.stop_until_rate_reset(50)
             if v.repo_name != repo.name:
                 repo = self.g.get_repo(v.repo_name)
+            
             path = v.directory.lstrip(v.repo_name).lstrip('/')
             commits = repo.get_commits(path=path)
+            try:
+                repo.get_dir_contents(path)
+            except UnknownObjectException:
+                del self.quantlets[k]
+                continue
             if not commits.get_page(0) or 'metainfo.txt' not in [i.name.lower() for i in repo.get_dir_contents(path)]:
                 del self.quantlets[k]
                 continue
@@ -125,6 +130,9 @@ class QUANTLET:
                 contents = repo.get_dir_contents(path)
                 content = [i for i in contents if i.name.lower() == 'metainfo.txt'][0]
                 self.quantlets[k] = METAFILE(file=content, repo=repo, content=contents,commits=commits)
+    def remove_deleted_repos(self,repos_del):
+        self.quantlets = {k:v for k,v in self.quantlets.items() if v.repo_name not in repos_del}
+    
     def update_all_metafiles(self,since=None):
         """Updates all metafiles, thus executes update_existing_metafiles and searches for new Quantlets.
 
@@ -133,7 +141,8 @@ class QUANTLET:
         self.update_existing_metafiles()
         if since is None:
             since = self.get_last_commit()
-        repos = self.get_recently_changed_repos(since=since)
+        repos,repos_del = self.get_recently_changed_repos(since=since)
+        self.remove_deleted_repos(repos_del)
         if repos:
             self.download_metafiles_from_user(repos,override=False)
     def download_metafiles_from_user(self, repo_name=None, override=True):
@@ -207,10 +216,14 @@ class QUANTLET:
         assert isinstance(since, datetime.datetime), \
             "Variable since must be of type datetime.datetime, e.g. datetime.datetime.strptime('2018-01-01', '%Y-%m-%d')"
         since += datetime.timedelta(seconds=1)
-        self.stop_until_rate_reset()
+        self.stop_until_rate_reset(50)
         ret = []
-        for repo in tqdm(list(self.g.get_repos())):
-            self.stop_until_rate_reset()
+        repos_online = list(self.g.get_repos())
+        
+        s_online = set(i.name for i in repos_online)
+        s_offline = set(v.repo_name for k,v in self.quantlets.items())
+        for repo in tqdm(repos_online):
+            self.stop_until_rate_reset(50)
             try:
                 if repo.get_commits(since=since).get_page(0):
                     ret.append(repo.name)
@@ -219,7 +232,7 @@ class QUANTLET:
                     pass
                 else:
                     raise
-        return ret
+        return ret, list(s_offline - s_online)
     def create_readme(self,repos=None):
         """Creates readmes in the repositories in the repository list repos.
 
@@ -266,16 +279,16 @@ class QUANTLET:
             readme = '\n\n'.join(strl)
             return readme
 
-        self.stop_until_rate_reset()
+        self.stop_until_rate_reset(50)
         if repos is None:
             repos = list(self.g.get_repos())
 
         for repo in tqdm(repos):
-            self.stop_until_rate_reset()
+            self.stop_until_rate_reset(50)
             qs = {k:v for k,v in self.quantlets.items() if repo.name.lower() == v.repo_name.lower()}
             for k,v in qs.items():
                 try:
-                    self.stop_until_rate_reset()
+                    self.stop_until_rate_reset(50)
                     contents = repo.get_contents(v.directory.lstrip(v.repo_name))
                     if [i for i in contents if 'README.md'.lower() == i.name.lower()]:
                         continue
@@ -344,9 +357,9 @@ class QUANTLET:
         for k, v in self.quantlets.items():
             if v.is_debuggable:
                 text = ''
-                if include_keywords:
+                if include_keywords and isinstance(v.metainfo_debugged['keywords'],str):
                     text += v.metainfo_debugged['keywords']
-                if include_description:
+                if include_description and isinstance(v.metainfo_debugged['description'],str):
                     text += v.metainfo_debugged['description']
                 if include_whole_metainfo:
                     text = v.metainfo_undebugged
@@ -740,7 +753,7 @@ class QUANTLET:
             try:
                 nodes.append(__create_template(v,cluster_label.get(k,' '),id))
             except:
-                print(k)
+                #print(k)
                 print(v.metainfo_undebugged)
                 raise
             id += 1
